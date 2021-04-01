@@ -1,4 +1,4 @@
-import psycopg
+import psycopg2
 import random
 import streamlit as st
 # To make things easier later, we're also importing numpy and pandas for
@@ -10,7 +10,7 @@ QUANTIDADE_DE_TEMAS = 25
 
 # Set up a connection to the postgres server
 conn_string = "host=179.188.16.131 port=5432 dbname=recommender user=recommender password=Tera2021"
-conn = psycopg.connect(conn_string)
+conn = psycopg2.connect(conn_string)
 print("Connected!")
 
 # Create a cursor to connect in the database
