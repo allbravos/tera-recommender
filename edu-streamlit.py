@@ -120,16 +120,9 @@ def recommend_artigo(usuario):
     df = query(sql)
 
     artigo = Artigo()
-    # Se ha artigos ainda nao avaliados, escolhe um deles
+    # Se ha artigos ainda nao avaliados, escolhe o primeiro deles
     if len(df) > 0:
-        artigos = list()
-        for index, row in df.iterrows():
-            artigo = Artigo().load(row['id'], row['id_tema'], row['titulo'], row['url'])
-            artigos.append(artigo)
-
-        # Escolhe um artigo randomico para recomendar
-        index_artigo_escolhido = random.randint(0, len(artigos) - 1)
-        artigo = artigos[index_artigo_escolhido]
+        artigo = Artigo().load(df['id'][0], df['id_tema'][0], df['titulo'][0], df['url'][0])
     else:
         # Seleciona o artigo com maior Score local
         sql = 'SELECT a.id, a.id_tema, a.titulo, a.url, ac.score FROM public.artigos as a ' \
@@ -189,8 +182,11 @@ st.write('[{}]({})'.format(artigo.url, artigo.url))
 
 st.subheader('Deixe seu Feedback sobre o artigo:')
 nps = st.slider('Qual a chance de você recomendar esse artigo para um amigo interessado em Data Science?',
-                min_value=0, max_value=10, value=5)
+                min_value=0, max_value=10, value=None)
 
 if nps:
     if st.button('Enviar Feedback'):
         save_feedback(usuario_selecionado, artigo, nps)
+        st.experimental_rerun()
+
+conn.close()
