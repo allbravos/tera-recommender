@@ -31,6 +31,8 @@ class Usuario:
         self.email = email
         self.nome = nome
 
+    def __str__(self):
+        return self.nome
 
 # Define a classe Artigo
 class Artigo:
@@ -97,9 +99,75 @@ def load_usuarios():
     usuarios = list()
     for index, row in df.iterrows():
         usuario = Usuario()
-        usuario.load(df['id'][0], df['id_perfil'][0], df['email'][0], df['nome'][0])
+        usuario.load(df['id'][index], df['id_perfil'][index], df['email'][index], df['nome'][index])
         usuarios.append(usuario)
     return usuarios
+
+
+def recommend_artigo(usuario):
+    # Verifica qual o ultimo tema que o usuario deu feedback
+    sql = 'SELECT max(id_tema) as ultimo_tema FROM public.feedbacks WHERE id_usuario = {};'.format(usuario.id)
+    df_ultimo_tema = query(sql)
+
+    id_tema = 1
+    if df_ultimo_tema['ultimo_tema'][0] != None:
+        id_tema = int(df_ultimo_tema['ultimo_tema'][0]) + 1
+
+    # Consulta os artigos que ainda não receberam feedback do perfil selecionado
+    sql = 'SELECT a.id, a.id_tema, a.titulo, a.url, f.nps FROM public.artigos as a ' \
+    'LEFT JOIN public.feedbacks as f on a.id = f.id_artigo AND f.id_perfil = {}' \
+    'WHERE a.id_tema = {} AND f.nps IS NULL;'.format(usuario.id_perfil, id_tema)
+    df = query(sql)
+
+    artigo = Artigo()
+    # Se ha artigos ainda nao avaliados, escolhe um deles
+    if len(df) > 0:
+        artigos = list()
+        for index, row in df.iterrows():
+            artigo = Artigo().load(row['id'], row['id_tema'], row['titulo'], row['url'])
+            artigos.append(artigo)
+
+        # Escolhe um artigo randomico para recomendar
+        index_artigo_escolhido = random.randint(0, len(artigos) - 1)
+        artigo = artigos[index_artigo_escolhido]
+    else:
+        # Seleciona o artigo com maior Score local
+        sql = 'SELECT a.id, a.id_tema, a.titulo, a.url, ac.score FROM public.artigos as a ' \
+              'INNER JOIN public.artigos_score as ac on a.id = ac.id_artigo AND ac.id_perfil = {} ' \
+              'WHERE id_tema = {} ORDER BY ac.score DESC;'.format(usuario.id_perfil, id_tema)
+        df = query(sql)
+
+        # Se não tem artigos para este tema, retorna vazio
+        if len(df) == 0:
+            return None
+
+        artigo = Artigo().load(df['id'][0], df['id_tema'][0], df['titulo'][0], df['url'][0])
+
+    return artigo
+
+
+def save_feedback(usuario, artigo, nps):
+
+    values = [usuario.id, usuario.id_perfil, usuario.id_preferencia_idioma, artigo.id, artigo.id_tema, nps]
+    insert('public', 'feedbacks', 'id_usuario, id_perfil, id_preferencia_idioma, id_artigo, id_tema, nps', values)
+
+    # Atualiza o score local (por perfil) do artigo
+    sql = 'SELECT avg(f.nps) as score FROM public.artigos as a ' \
+          'LEFT JOIN public.feedbacks as f on a.id = f.id_artigo AND f.id_perfil = {}' \
+          'WHERE a.id = {} AND f.nps IS NOT NULL;'.format(usuario.id_perfil, artigo.id)
+    df_average = query(sql)
+    score = int(df_average['score'][0])
+    values = [artigo.id, usuario.id_perfil, score]
+
+    # Verifica se o artigo ja possuia um score para o perfil
+    df_score = select('public', 'artigos_score', 'id_artigo = {} AND id_perfil = {}'.
+                      format(artigo.id, usuario.id_perfil))
+
+    if len(df_score) == 0:
+        insert('public', 'artigos_score', 'id_artigo, id_perfil,score', values)
+    else:
+        update('public', 'artigos_score', 'score = ' + str(score), 'id_artigo = {} AND id_perfil = {}'.
+               format(artigo.id, usuario.id_perfil))
 
 
 # INICIA O FLUXO PRINCIPAL DA APLICAÇÃO STREAMLIT
@@ -108,28 +176,21 @@ st.title("I'm Edu")
 st.header('Educational Recommender and Guru')
 st.text('Recomendação de Trilha para Data Science')
 
-# Inicia o questionario de perfil no sidebar
+# Monta o combo com as opções de usuários
 st.subheader('Quem é você?')
 usuarios = load_usuarios()
 usuario_selecionado = st.selectbox('', usuarios)
 
-# if len(df) == 0:
-#
-#     # Avalia o perfil do usuário
-#     nome = st.sidebar.text_input('Nome', key='nome')
-#     profissao = st.sidebar.radio('Qual desses perfis profissionais te descreve melhor?',
-#                          ('1 - Pessoa desenvolvedora',
-#                           '2 - Da Matemática ou Estatística',
-#                           '3 - Sou de uma outra área',
-#                           '4 - Não tenho profissão ainda'),
-#                          key='profissao')
-#     enviar_respostas = st.sidebar.button('Enviar Respostas', key='enviar_respostas')
-#
-# else:
-#     usuario.load(df['id'][0], df['id_perfil'][0], df['email'][0], df['nome'][0])
-#
-#     df = pd.DataFrame({
-#         'nome': usuario.nome,
-#         'usuario': usuario
-#     }, index={0})
-#     option = st.sidebar.selectbox('Bem-vind@ ', df)
+# Recomenda o próximo artigo para o usuário
+artigo = recommend_artigo(usuario_selecionado)
+st.subheader('Sua próxima recomendação de artigo é:')
+st.text(artigo.titulo)
+st.write('[{}]({})'.format(artigo.url, artigo.url))
+
+st.subheader('Deixe seu Feedback sobre o artigo:')
+nps = st.slider('Qual a chance de você recomendar esse artigo para um amigo interessado em Data Science?',
+                min_value=0, max_value=10, value=5)
+
+if nps:
+    if st.button('Enviar Feedback'):
+        save_feedback(usuario_selecionado, artigo, nps)
